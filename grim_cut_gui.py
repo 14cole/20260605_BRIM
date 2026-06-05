@@ -1090,8 +1090,10 @@ class GrimCutWindow(DatasetOpsMixin, PlotOpsMixin, QMainWindow):
             lambda event, lbl=hover_readout: self._reset_hover_readout(lbl),
         )
 
-        # Plot-operations toolbar — docked above the plot (full width), every
-        # action on a single row.
+        # Plot-operations toolbar — docked above the plot, actions split across
+        # two rows so the toolbar's minimum width stays narrow (otherwise a
+        # single long row forces the whole plot area wider than the screen and
+        # pushes the right-hand buttons off-screen when the side panels open).
         row1_specs, row2_specs = PLOT_OPS_SPECS[tab_key]
         plot_controls: dict[str, QToolButton] = {}
 
@@ -1111,13 +1113,18 @@ class GrimCutWindow(DatasetOpsMixin, PlotOpsMixin, QMainWindow):
 
         plot_ops_bar = QFrame()
         plot_ops_bar.setObjectName("plotToolbar")
-        plot_ops_bar_layout = QHBoxLayout(plot_ops_bar)
+        plot_ops_bar_layout = QVBoxLayout(plot_ops_bar)
         plot_ops_bar_layout.setContentsMargins(8, 6, 8, 6)
         plot_ops_bar_layout.setSpacing(4)
-        plot_ops_bar_layout.addWidget(chk_plot_legend)
-        for label, role in (*row1_specs, *row2_specs):
-            plot_ops_bar_layout.addWidget(_make_plot_button(label, role))
-        plot_ops_bar_layout.addStretch(1)
+        for _row_index, _specs in enumerate((row1_specs, row2_specs)):
+            bar_row = QHBoxLayout()
+            bar_row.setSpacing(4)
+            if _row_index == 0:
+                bar_row.addWidget(chk_plot_legend)
+            for label, role in _specs:
+                bar_row.addWidget(_make_plot_button(label, role))
+            bar_row.addStretch(1)
+            plot_ops_bar_layout.addLayout(bar_row)
         self._plot_controls_by_tab[tab_key] = plot_controls
 
         assembly_tree_panel = AssemblyTreePanel()
