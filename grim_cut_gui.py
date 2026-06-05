@@ -190,6 +190,7 @@ def build_qss(palette: dict[str, str]) -> str:
     QLabel#paramHeader {{ color: {palette['text']}; font-weight: 600; padding: 2px; }}
     QLabel#plotTitle {{ color: {palette['text']}; font-weight: 700; font-size: 14px; padding: 2px 4px; }}
     QFrame#plotToolbar {{ background: {palette['head_bg']}; border: 1px solid {palette['border']}; border-radius: 8px; }}
+    QFrame#datasetOpsPanel {{ background: {palette['panel_bg']}; border: 1px solid {palette['border']}; border-radius: 8px; }}
     """
 
 
@@ -438,6 +439,7 @@ class GrimCutWindow(DatasetOpsMixin, PlotOpsMixin, QMainWindow):
         self._plot_contexts: dict[str, PlotContext] = {}
         self._plot_controls_by_tab: dict[str, dict[str, QToolButton]] = {}
         self._active_plot_tab = "plotting"
+        self._dataset_ops_visible = False
 
         # Hover readout is debounced — rapid mouse-moves coalesce into one
         # update so the per-event z lookup (O(N) for QuadMesh / 3D scatter)
@@ -537,13 +539,24 @@ class GrimCutWindow(DatasetOpsMixin, PlotOpsMixin, QMainWindow):
         params_grid.addWidget(self.list_az, 3, 1)
         sec_params.addLayout(params_grid)
 
-        # ---------- Operations section (categorised button pads) ----------
-        sec_ops = CollapsibleSection("Operations", expanded=False)
+        # ---------- Dataset Operations (pop-out panel beside the table) ----------
+        # Shared across plot tabs and toggled from each tab's "Dataset
+        # Operations" button; docked next to the datasets table, left of the plot.
+        self._dataset_ops_panel = QFrame()
+        self._dataset_ops_panel.setObjectName("datasetOpsPanel")
+        self._dataset_ops_panel.setMinimumWidth(220)
+        self._dataset_ops_panel.setVisible(False)
+        ops_panel_layout = QVBoxLayout(self._dataset_ops_panel)
+        ops_panel_layout.setContentsMargins(8, 8, 8, 8)
+        ops_panel_layout.setSpacing(6)
+        ops_panel_title = QLabel("Dataset Operations")
+        ops_panel_title.setObjectName("plotTitle")
+        ops_panel_layout.addWidget(ops_panel_title)
 
-        def _ops_pad(title: str, specs: tuple[tuple[str, str], ...], cols: int = 3) -> None:
+        def _ops_pad(title: str, specs: tuple[tuple[str, str], ...], cols: int = 2) -> None:
             cap = QLabel(title)
             cap.setObjectName("opsCategory")
-            sec_ops.addWidget(cap)
+            ops_panel_layout.addWidget(cap)
             grid = QGridLayout()
             grid.setHorizontalSpacing(4)
             grid.setVerticalSpacing(4)
@@ -554,7 +567,7 @@ class GrimCutWindow(DatasetOpsMixin, PlotOpsMixin, QMainWindow):
                 grid.addWidget(btn, i // cols, i % cols)
             for c in range(cols):
                 grid.setColumnStretch(c, 1)
-            sec_ops.addLayout(grid)
+            ops_panel_layout.addLayout(grid)
 
         _ops_pad("Combine", (
             ("Coherent +", "btn_coherent_add"),
@@ -590,7 +603,17 @@ class GrimCutWindow(DatasetOpsMixin, PlotOpsMixin, QMainWindow):
 
         dock_layout.addWidget(sec_datasets, 1)
         dock_layout.addWidget(sec_params)
-        dock_layout.addWidget(sec_ops)
+        ops_panel_layout.addStretch(1)
+
+        # Dock the shared Dataset Operations panel between the control dock and
+        # the plot, so it appears right next to the datasets table when shown.
+        plot_splitter.insertWidget(1, self._dataset_ops_panel)
+        plot_splitter.setStretchFactor(0, 0)
+        plot_splitter.setStretchFactor(1, 0)
+        plot_splitter.setStretchFactor(2, 1)
+        plot_splitter.setSizes(
+            [self._dock_width, 260, 1550 - self._dock_width - 260]
+        )
 
         dock.setWidget(dock_body)
         self._shared_right_panel = dock
@@ -737,6 +760,7 @@ class GrimCutWindow(DatasetOpsMixin, PlotOpsMixin, QMainWindow):
             sc.activated.connect(slot)
         for tab_key, context in self._plot_contexts.items():
             context.btn_assembly_tree.toggled.connect(context.assembly_tree_panel.setVisible)
+            context.btn_dataset_ops.toggled.connect(self._toggle_dataset_ops)
             context.btn_settings.toggled.connect(context.settings_frame.setVisible)
             context.btn_export_plot.clicked.connect(self._export_plot)
             context.chk_plot_legend.toggled.connect(self._update_legend_visibility)
@@ -815,10 +839,13 @@ class GrimCutWindow(DatasetOpsMixin, PlotOpsMixin, QMainWindow):
         topbar.addStretch(1)
         btn_assembly_tree = QToolButton(text="Assembly Tree")
         btn_assembly_tree.setCheckable(True)
+        btn_dataset_ops = QToolButton(text="Dataset Operations")
+        btn_dataset_ops.setCheckable(True)
         btn_export_plot = QToolButton(text="Export Plot")
         btn_settings = QToolButton(text="Plot Settings")
         btn_settings.setCheckable(True)
         topbar.addWidget(btn_assembly_tree)
+        topbar.addWidget(btn_dataset_ops)
         topbar.addWidget(btn_export_plot)
         topbar.addWidget(btn_settings)
         left_layout.addLayout(topbar)
@@ -1063,18 +1090,8 @@ class GrimCutWindow(DatasetOpsMixin, PlotOpsMixin, QMainWindow):
             lambda event, lbl=hover_readout: self._reset_hover_readout(lbl),
         )
 
-        assembly_tree_panel = AssemblyTreePanel()
-        assembly_tree_panel.setVisible(False)
-
-        inner_split = QSplitter(Qt.Horizontal)
-        inner_split.addWidget(assembly_tree_panel)
-        inner_split.addWidget(plot_frame)
-        inner_split.setStretchFactor(0, 0)
-        inner_split.setStretchFactor(1, 1)
-        inner_split.setSizes([240, 9999])
-        left_layout.addWidget(inner_split, 1)
-
-        # Plot-operations toolbar, docked at the top of the plot area (above the canvas).
+        # Plot-operations toolbar — docked above the plot (full width), every
+        # action on a single row.
         row1_specs, row2_specs = PLOT_OPS_SPECS[tab_key]
         plot_controls: dict[str, QToolButton] = {}
 
@@ -1094,25 +1111,32 @@ class GrimCutWindow(DatasetOpsMixin, PlotOpsMixin, QMainWindow):
 
         plot_ops_bar = QFrame()
         plot_ops_bar.setObjectName("plotToolbar")
-        plot_ops_bar_layout = QVBoxLayout(plot_ops_bar)
+        plot_ops_bar_layout = QHBoxLayout(plot_ops_bar)
         plot_ops_bar_layout.setContentsMargins(8, 6, 8, 6)
         plot_ops_bar_layout.setSpacing(4)
-        for _row_index, _specs in enumerate((row1_specs, row2_specs)):
-            bar_row = QHBoxLayout()
-            bar_row.setSpacing(4)
-            if _row_index == 0:
-                bar_row.addWidget(chk_plot_legend)
-            for label, role in _specs:
-                bar_row.addWidget(_make_plot_button(label, role))
-            bar_row.addStretch(1)
-            plot_ops_bar_layout.addLayout(bar_row)
-        # Insert just below the Display header row (index 0), above the plot (index 1).
-        left_layout.insertWidget(1, plot_ops_bar)
+        plot_ops_bar_layout.addWidget(chk_plot_legend)
+        for label, role in (*row1_specs, *row2_specs):
+            plot_ops_bar_layout.addWidget(_make_plot_button(label, role))
+        plot_ops_bar_layout.addStretch(1)
         self._plot_controls_by_tab[tab_key] = plot_controls
+
+        assembly_tree_panel = AssemblyTreePanel()
+        assembly_tree_panel.setVisible(False)
+
+        inner_split = QSplitter(Qt.Horizontal)
+        inner_split.addWidget(assembly_tree_panel)
+        inner_split.addWidget(plot_frame)
+        inner_split.setStretchFactor(0, 0)
+        inner_split.setStretchFactor(1, 1)
+        inner_split.setSizes([240, 9999])
+        left_layout.addWidget(inner_split, 1)
+        # Toolbar sits just below the Display header (index 0), above the plot.
+        left_layout.insertWidget(1, plot_ops_bar)
 
         return PlotContext(
             btn_export_plot=btn_export_plot,
             btn_assembly_tree=btn_assembly_tree,
+            btn_dataset_ops=btn_dataset_ops,
             btn_settings=btn_settings,
             settings_frame=settings_frame,
             assembly_tree_panel=assembly_tree_panel,
@@ -1164,11 +1188,30 @@ class GrimCutWindow(DatasetOpsMixin, PlotOpsMixin, QMainWindow):
         if splitter.indexOf(self._shared_right_panel) >= 0:
             return
         self._shared_right_panel.setParent(None)
+        self._dataset_ops_panel.setParent(None)
         splitter.insertWidget(0, self._shared_right_panel)
+        splitter.insertWidget(1, self._dataset_ops_panel)
         splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(1, 0)
+        splitter.setStretchFactor(2, 1)
         total = max(splitter.width(), 1400)
-        splitter.setSizes([self._dock_width, total - self._dock_width])
+        ops_w = 260 if self._dataset_ops_visible else 0
+        splitter.setSizes([self._dock_width, ops_w, total - self._dock_width - ops_w])
+        self._dataset_ops_panel.setVisible(self._dataset_ops_visible)
+
+    def _toggle_dataset_ops(self, checked: bool) -> None:
+        """Show/hide the shared Dataset Operations panel (toggled per tab)."""
+        self._dataset_ops_visible = checked
+        self._dataset_ops_panel.setVisible(checked)
+        splitter = self._plot_splitters.get(self._active_plot_tab)
+        if splitter is None or splitter.indexOf(self._dataset_ops_panel) < 0:
+            return
+        sizes = splitter.sizes()
+        if checked and len(sizes) >= 3 and sizes[1] == 0:
+            total = sum(sizes)
+            sizes[1] = 260
+            sizes[2] = max(200, total - sizes[0] - 260)
+            splitter.setSizes(sizes)
 
     def _activate_plot_tab(self, tab_key: str) -> None:
         if tab_key not in self._plot_contexts:
@@ -1200,6 +1243,13 @@ class GrimCutWindow(DatasetOpsMixin, PlotOpsMixin, QMainWindow):
         context = self._plot_contexts[tab_key]
         for field in PlotContext.__dataclass_fields__:
             setattr(self, field, getattr(context, field))
+
+        # Keep the shared Dataset Operations panel + this tab's toggle in sync.
+        self._dataset_ops_panel.setVisible(self._dataset_ops_visible)
+        ops_btn = context.btn_dataset_ops
+        ops_btn.blockSignals(True)
+        ops_btn.setChecked(self._dataset_ops_visible)
+        ops_btn.blockSignals(False)
 
     def _on_main_tab_changed(self, index: int) -> None:
         tab_key = self._tab_key_for_index.get(index)

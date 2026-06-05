@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 class PlotContext:
     btn_export_plot: QToolButton
     btn_assembly_tree: QToolButton
+    btn_dataset_ops: QToolButton
     btn_settings: QToolButton
     settings_frame: QFrame
     assembly_tree_panel: QWidget
