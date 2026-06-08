@@ -508,13 +508,13 @@ class GrimCutWindow(DatasetOpsMixin, PlotOpsMixin, QMainWindow):
         self.table.setMinimumHeight(160)
         sec_datasets.addWidget(self.table, 1)
 
-        # ---------- Parameters section (2x2 grid replaces the 4-column strip) ----------
+        # ---------- Parameters section (single 4-column strip) ----------
         sec_params = CollapsibleSection("Parameters")
         params_grid = QGridLayout()
         params_grid.setHorizontalSpacing(10)
         params_grid.setVerticalSpacing(4)
-        params_grid.setColumnStretch(0, 1)
-        params_grid.setColumnStretch(1, 1)
+        for col in range(4):
+            params_grid.setColumnStretch(col, 1)
         self.list_pol = QListWidget()
         self.list_freq = QListWidget()
         self.list_elev = QListWidget()
@@ -523,20 +523,21 @@ class GrimCutWindow(DatasetOpsMixin, PlotOpsMixin, QMainWindow):
             widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
             widget.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
             widget.setMinimumHeight(96)
-        lbl_pol = ClickableLabel("Polarization")
-        lbl_freq = ClickableLabel("Frequency (GHz)")
-        lbl_elev = ClickableLabel("Elevation (deg)")
-        lbl_az = ClickableLabel("Azimuth (deg)")
+        lbl_pol = ClickableLabel("Pol")
+        lbl_freq = ClickableLabel("Freq (GHz)")
+        lbl_elev = ClickableLabel("El (deg)")
+        lbl_az = ClickableLabel("Az (deg)")
         for lbl in (lbl_pol, lbl_freq, lbl_elev, lbl_az):
             lbl.setObjectName("paramHeader")
+        # One row of headers, one row of lists, four columns across.
         params_grid.addWidget(lbl_pol, 0, 0)
         params_grid.addWidget(lbl_freq, 0, 1)
+        params_grid.addWidget(lbl_elev, 0, 2)
+        params_grid.addWidget(lbl_az, 0, 3)
         params_grid.addWidget(self.list_pol, 1, 0)
         params_grid.addWidget(self.list_freq, 1, 1)
-        params_grid.addWidget(lbl_elev, 2, 0)
-        params_grid.addWidget(lbl_az, 2, 1)
-        params_grid.addWidget(self.list_elev, 3, 0)
-        params_grid.addWidget(self.list_az, 3, 1)
+        params_grid.addWidget(self.list_elev, 1, 2)
+        params_grid.addWidget(self.list_az, 1, 3)
         sec_params.addLayout(params_grid)
 
         # ---------- Dataset Operations (pop-out panel beside the table) ----------
